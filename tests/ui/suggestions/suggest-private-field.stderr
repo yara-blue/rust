@@ -1,0 +1,36 @@
+error[E0369]: cannot add `{integer}` to `bool`
+  --> $DIR/suggest-private-field.rs:36:13
+   |
+LL |     a.field + 5;
+   |     ------- ^ - {integer}
+   |     |
+   |     bool
+
+error[E0308]: mismatched types
+  --> $DIR/suggest-private-field.rs:41:22
+   |
+LL |     let res: usize = a.field;
+   |              -----   ^^^^^^^ expected `usize`, found `bool`
+   |              |
+   |              expected due to this
+
+error[E0369]: cannot add `{integer}` to `bool`
+  --> $DIR/suggest-private-field.rs:45:16
+   |
+LL |     a.method() + 5;
+   |     ---------- ^ - {integer}
+   |     |
+   |     bool
+
+error[E0308]: mismatched types
+  --> $DIR/suggest-private-field.rs:50:22
+   |
+LL |     let res: usize = a.method();
+   |              -----   ^^^^^^^^^^ expected `usize`, found `bool`
+   |              |
+   |              expected due to this
+
+error: aborting due to 4 previous errors
+
+Some errors have detailed explanations: E0308, E0369.
+For more information about an error, try `rustc --explain E0308`.
