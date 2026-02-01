@@ -3298,6 +3298,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         .with_span_label(field.span, "private field")
     }
 
+    // FIXME(yara) interesting
     pub(crate) fn get_field_candidates_considering_privacy_for_diag(
         &self,
         span: Span,

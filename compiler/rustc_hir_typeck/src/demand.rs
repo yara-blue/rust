@@ -17,6 +17,7 @@ use super::method::probe;
 use crate::FnCtxt;
 
 impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
+    // FIXME(yara) do we need to add anything here?
     pub(crate) fn emit_type_mismatch_suggestions(
         &self,
         err: &mut Diag<'_>,
@@ -78,6 +79,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         expected_ty_expr: Option<&'tcx hir::Expr<'tcx>>,
         error: Option<TypeError<'tcx>>,
     ) {
+        dbg!(error);
         if expr_ty == expected {
             return;
         }
@@ -104,6 +106,116 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         self.suggest_method_call_on_range_literal(err, expr, expr_ty, expected);
         self.suggest_return_binding_for_missing_tail_expr(err, expr, expr_ty, expected);
         self.note_wrong_return_ty_due_to_generic_arg(err, expr, expr_ty);
+        self.note_type_is_deref(err, expected, expr_ty, expr);
+    }
+
+    pub(crate) fn note_type_is_deref(
+        &self,
+        diag: &mut Diag<'_>,
+        expected_ty: Ty<'tcx>,
+        found_ty: Ty<'tcx>,
+        expr: &hir::Expr<'_>,
+    ) {
+        dbg!(diag);
+        dbg!(found_ty);
+        dbg!(expr);
+
+        fn is_private_field_suggestable<'tcx>(
+            tcx: ty::TyCtxt<'tcx>,
+            field: &ty::FieldDef,
+            span: Span,
+        ) -> bool {
+            // The field must not be unstable.
+            !matches!(
+                tcx.eval_stability(field.did, None, rustc_span::DUMMY_SP, None),
+                rustc_middle::middle::stability::EvalResult::Deny { .. }
+            )
+            // If the field is from an external crate it must not be `doc(hidden)`.
+            && (field.did.is_local() || !tcx.is_doc_hidden(field.did))
+            // If the field is hygienic it must come from the same syntax context.
+            && tcx.def_ident_span(field.did).unwrap().normalize_to_macros_2_0().eq_ctxt(span)
+        }
+
+        match dbg!(expr.kind) {
+            // FIXME(yara) do this for method calls too
+            hir::ExprKind::Field(field, og_name) => {
+                dbg!(field);
+                let results = self.typeck_results.borrow();
+                let adjustment = results.expr_adjustments(field);
+                if let Some(ty::adjustment::Adjustment {
+                    kind:
+                        ty::adjustment::Adjust::Deref(ty::adjustment::DerefAdjustKind::Overloaded(
+                            deref,
+                        )),
+                    ..
+                }) = adjustment.iter().next()
+                {
+                    println!("DEREF DETECTED");
+                    // FIXME(yara) figure out if org field was public
+                    dbg!(deref);
+
+                    match dbg!(field.kind) {
+                        // hir::ExprKind::Path(hir::QPath::Resolved(_, hir::Path {
+                        //     segments: [hir::PathSegment { hir_id, .. }, ..], ..
+                        //     // segments, ..
+                        // })) => {
+                        //     dbg!("HIIIII");
+                        //     dbg!(hir_id);
+                        //     dbg!(results.node_type(*hir_id));
+                        // }
+                        hir::ExprKind::Path(hir::QPath::Resolved(_, hir::Path {
+                            res: crate::Res::Local(hir_id), ..
+                            // segments, ..
+                        })) => {
+                            dbg!("HIIIII");
+                            dbg!(hir_id);
+                            let ty = results.node_type(*hir_id);
+                            let resolved_ty = self.resolve_vars_if_possible(ty);
+
+                            match resolved_ty.kind() {
+                                ty::Adt(base_def, args) if !base_def.is_enum() => {
+                                    let tcx = self.tcx;
+                                    let fields = &base_def.non_enum_variant().fields;
+                                    let private_fields = fields
+                                        .iter()
+                                        // Private suggestable field2s only
+                                        .filter(move |field2| {
+                                            let mod_id = self.tcx.parent_module(*hir_id);
+                                            !field2.vis.is_accessible_from(mod_id, tcx)
+                                        // FIXME(yara) is this span from the correct expr?
+                                        }).filter(move |field2| is_private_field_suggestable(tcx, field2, expr.span))
+                                        // For compile-time reasons put a limit on number of field2s we search
+                                        .take(100)
+                                        .find(move |field2| field2.ident(self.tcx).name == og_name.name);
+                                        // .map(|field2| {
+                                        //     (
+                                        //         // FIXME(yara) I stole this, do we need the
+                                        //         // normalize macros 2.0? I think so?
+                                        //         field2.ident(self.tcx).normalize_to_macros_2_0(),
+                                        //         field2.ty(self.tcx, args),
+                                        //     )
+                                        // })
+                                        // .collect::<Vec<_>>();
+                                    dbg!(private_fields);
+                                }
+                                _ => panic!("hi yara messed up"),
+                            }
+
+                            dbg!(resolved_ty);
+                            // resolved_ty.
+                            // FIXME(yara) next figure out if the field exists on
+                            // this type. If so we must have dereferenced because it is not public.
+                            // Therefore
+                        }
+                        _ => todo!(),
+                    }
+                }
+                // .iter().any(|adj| matches!(adj.kind, ty::adjustment::Adjust::Deref(..)))
+                // let node = self.tcx.parent_hir_node(field.hir_id);
+                // dbg!(node);
+            }
+            _ => (),
+        }
     }
 
     /// Really hacky heuristic to remap an `assert_eq!` error to the user
@@ -260,6 +372,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         mut expected_ty_expr: Option<&'tcx hir::Expr<'tcx>>,
         allow_two_phase: AllowTwoPhase,
     ) -> Result<Ty<'tcx>, Diag<'a>> {
+        // FIXME(yara) why do we not emit errors like annotate_alternative_method_deref here?
         let expected = if self.next_trait_solver() {
             expected
         } else {
@@ -271,6 +384,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             Err(e) => e,
         };
 
+        dbg!(e);
         self.adjust_expr_for_assert_eq_macro(&mut expr, &mut expected_ty_expr);
 
         self.set_tainted_by_errors(self.dcx().span_delayed_bug(
@@ -283,6 +397,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let mut err =
             self.err_ctxt().report_mismatched_types(&cause, self.param_env, expected, expr_ty, e);
 
+        // FIXME(yara) trace
         self.emit_coerce_suggestions(&mut err, expr, expr_ty, expected, expected_ty_expr, Some(e));
 
         Err(err)
