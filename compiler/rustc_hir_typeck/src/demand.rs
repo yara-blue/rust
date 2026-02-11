@@ -112,14 +112,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     pub(crate) fn note_type_is_deref(
         &self,
         diag: &mut Diag<'_>,
-        expected_ty: Ty<'tcx>,
+        _expected_ty: Ty<'tcx>,
         found_ty: Ty<'tcx>,
         expr: &hir::Expr<'_>,
     ) {
-        dbg!(diag);
-        dbg!(found_ty);
-        dbg!(expr);
-
         fn is_private_field_suggestable<'tcx>(
             tcx: ty::TyCtxt<'tcx>,
             field: &ty::FieldDef,
@@ -136,39 +132,22 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             && tcx.def_ident_span(field.did).unwrap().normalize_to_macros_2_0().eq_ctxt(span)
         }
 
-        match dbg!(expr.kind) {
+        match expr.kind {
             // FIXME(yara) do this for method calls too
-            hir::ExprKind::Field(field, og_name) => {
-                dbg!(field);
+            hir::ExprKind::Field(field, requested_field) => {
                 let results = self.typeck_results.borrow();
                 let adjustment = results.expr_adjustments(field);
                 if let Some(ty::adjustment::Adjustment {
                     kind:
-                        ty::adjustment::Adjust::Deref(ty::adjustment::DerefAdjustKind::Overloaded(
-                            deref,
-                        )),
+                        ty::adjustment::Adjust::Deref(ty::adjustment::DerefAdjustKind::Overloaded(_)),
                     ..
-                }) = adjustment.iter().next()
+                }) = adjustment.first()
                 {
-                    println!("DEREF DETECTED");
-                    // FIXME(yara) figure out if org field was public
-                    dbg!(deref);
-
-                    match dbg!(field.kind) {
-                        // hir::ExprKind::Path(hir::QPath::Resolved(_, hir::Path {
-                        //     segments: [hir::PathSegment { hir_id, .. }, ..], ..
-                        //     // segments, ..
-                        // })) => {
-                        //     dbg!("HIIIII");
-                        //     dbg!(hir_id);
-                        //     dbg!(results.node_type(*hir_id));
-                        // }
-                        hir::ExprKind::Path(hir::QPath::Resolved(_, hir::Path {
-                            res: crate::Res::Local(hir_id), ..
-                            // segments, ..
-                        })) => {
-                            dbg!("HIIIII");
-                            dbg!(hir_id);
+                    match field.kind {
+                        hir::ExprKind::Path(hir::QPath::Resolved(
+                            _,
+                            hir::Path { res: crate::Res::Local(hir_id), .. },
+                        )) => {
                             let ty = results.node_type(*hir_id);
                             let resolved_ty = self.resolve_vars_if_possible(ty);
 
@@ -178,41 +157,36 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                                     let fields = &base_def.non_enum_variant().fields;
                                     let private_fields = fields
                                         .iter()
-                                        // Private suggestable field2s only
                                         .filter(move |field2| {
                                             let mod_id = self.tcx.parent_module(*hir_id);
                                             !field2.vis.is_accessible_from(mod_id, tcx)
-                                        // FIXME(yara) is this span from the correct expr?
-                                        }).filter(move |field2| is_private_field_suggestable(tcx, field2, expr.span))
-                                        // For compile-time reasons put a limit on number of field2s we search
+                                            // FIXME(yara) is this span from the correct expr?
+                                        })
+                                        .filter(move |field2| {
+                                            is_private_field_suggestable(tcx, field2, expr.span)
+                                        })
+                                        // For compile-time reasons put a limit on number of fields we search
                                         .take(100)
-                                        .find(move |field2| field2.ident(self.tcx).name == og_name.name);
-                                        // .map(|field2| {
-                                        //     (
-                                        //         // FIXME(yara) I stole this, do we need the
-                                        //         // normalize macros 2.0? I think so?
-                                        //         field2.ident(self.tcx).normalize_to_macros_2_0(),
-                                        //         field2.ty(self.tcx, args),
-                                        //     )
-                                        // })
-                                        // .collect::<Vec<_>>();
+                                        .find(move |field2| {
+                                            field2.ident(self.tcx).name == requested_field.name
+                                        });
+                                    // .map(|field2| {
+                                    //     (
+                                    //         // FIXME(yara) I stole this, do we need the
+                                    //         // normalize macros 2.0? I think so?
+                                    //         field2.ident(self.tcx).normalize_to_macros_2_0(),
+                                    //         field2.ty(self.tcx, args),
+                                    //     )
+                                    // })
+                                    // .collect::<Vec<_>>();
                                     dbg!(private_fields);
                                 }
                                 _ => panic!("hi yara messed up"),
                             }
-
-                            dbg!(resolved_ty);
-                            // resolved_ty.
-                            // FIXME(yara) next figure out if the field exists on
-                            // this type. If so we must have dereferenced because it is not public.
-                            // Therefore
                         }
                         _ => todo!(),
                     }
                 }
-                // .iter().any(|adj| matches!(adj.kind, ty::adjustment::Adjust::Deref(..)))
-                // let node = self.tcx.parent_hir_node(field.hir_id);
-                // dbg!(node);
             }
             _ => (),
         }
