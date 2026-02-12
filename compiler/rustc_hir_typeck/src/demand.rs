@@ -1,13 +1,15 @@
 use rustc_errors::{Applicability, Diag, MultiSpan, listify};
-use rustc_hir as hir;
 use rustc_hir::def::Res;
 use rustc_hir::intravisit::Visitor;
+use rustc_hir::{self as hir, HirId};
 use rustc_infer::infer::DefineOpaqueTypes;
 use rustc_middle::bug;
 use rustc_middle::ty::adjustment::AllowTwoPhase;
 use rustc_middle::ty::error::{ExpectedFound, TypeError};
 use rustc_middle::ty::print::with_no_trimmed_paths;
-use rustc_middle::ty::{self, AssocItem, BottomUpFolder, Ty, TypeFoldable, TypeVisitableExt};
+use rustc_middle::ty::{
+    self, AssocItem, BottomUpFolder, Ty, TyCtxt, TypeFoldable, TypeVisitableExt,
+};
 use rustc_span::{DUMMY_SP, Ident, Span, sym};
 use rustc_trait_selection::infer::InferCtxtExt;
 use rustc_trait_selection::traits::ObligationCause;
@@ -79,7 +81,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         expected_ty_expr: Option<&'tcx hir::Expr<'tcx>>,
         error: Option<TypeError<'tcx>>,
     ) {
-        dbg!(error);
         if expr_ty == expected {
             return;
         }
@@ -106,18 +107,19 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         self.suggest_method_call_on_range_literal(err, expr, expr_ty, expected);
         self.suggest_return_binding_for_missing_tail_expr(err, expr, expr_ty, expected);
         self.note_wrong_return_ty_due_to_generic_arg(err, expr, expr_ty);
-        self.note_type_is_deref(err, expected, expr_ty, expr);
+        self.note_type_is_deref(err, expected, expr);
     }
 
     pub(crate) fn note_type_is_deref(
         &self,
-        diag: &mut Diag<'_>,
-        _expected_ty: Ty<'tcx>,
-        found_ty: Ty<'tcx>,
+        err: &mut Diag<'_>,
+        expected_ty: Ty<'tcx>,
         expr: &hir::Expr<'_>,
     ) {
+        // FIXME(yara) do the same for methods
+        // FIXME(yara) should we deny any field from external crate?
         fn is_private_field_suggestable<'tcx>(
-            tcx: ty::TyCtxt<'tcx>,
+            tcx: TyCtxt<'tcx>,
             field: &ty::FieldDef,
             span: Span,
         ) -> bool {
@@ -132,60 +134,101 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             && tcx.def_ident_span(field.did).unwrap().normalize_to_macros_2_0().eq_ctxt(span)
         }
 
-        match expr.kind {
-            // FIXME(yara) do this for method calls too
-            hir::ExprKind::Field(field, requested_field) => {
-                let results = self.typeck_results.borrow();
-                let adjustment = results.expr_adjustments(field);
-                if let Some(ty::adjustment::Adjustment {
-                    kind:
-                        ty::adjustment::Adjust::Deref(ty::adjustment::DerefAdjustKind::Overloaded(_)),
-                    ..
-                }) = adjustment.first()
-                {
-                    match field.kind {
-                        hir::ExprKind::Path(hir::QPath::Resolved(
-                            _,
-                            hir::Path { res: crate::Res::Local(hir_id), .. },
-                        )) => {
-                            let ty = results.node_type(*hir_id);
-                            let resolved_ty = self.resolve_vars_if_possible(ty);
+        fn was_dereffed(
+            typeck_results: &std::cell::Ref<'_, ty::TypeckResults<'_>>,
+            field: &hir::Expr<'_>,
+        ) -> bool {
+            let adjustment = typeck_results.expr_adjustments(field);
+            if let Some(ty::adjustment::Adjustment {
+                kind: ty::adjustment::Adjust::Deref(ty::adjustment::DerefAdjustKind::Overloaded(_)),
+                ..
+            }) = adjustment.first()
+            {
+                true
+            } else {
+                false
+            }
+        }
 
-                            match resolved_ty.kind() {
-                                ty::Adt(base_def, args) if !base_def.is_enum() => {
-                                    let tcx = self.tcx;
-                                    let fields = &base_def.non_enum_variant().fields;
-                                    let private_fields = fields
-                                        .iter()
-                                        .filter(move |field2| {
-                                            let mod_id = self.tcx.parent_module(*hir_id);
-                                            !field2.vis.is_accessible_from(mod_id, tcx)
-                                            // FIXME(yara) is this span from the correct expr?
-                                        })
-                                        .filter(move |field2| {
-                                            is_private_field_suggestable(tcx, field2, expr.span)
-                                        })
-                                        // For compile-time reasons put a limit on number of fields we search
-                                        .take(100)
-                                        .find(move |field2| {
-                                            field2.ident(self.tcx).name == requested_field.name
-                                        });
-                                    // .map(|field2| {
-                                    //     (
-                                    //         // FIXME(yara) I stole this, do we need the
-                                    //         // normalize macros 2.0? I think so?
-                                    //         field2.ident(self.tcx).normalize_to_macros_2_0(),
-                                    //         field2.ty(self.tcx, args),
-                                    //     )
-                                    // })
-                                    // .collect::<Vec<_>>();
-                                    dbg!(private_fields);
-                                }
-                                _ => panic!("hi yara messed up"),
-                            }
+        // FIXME(yara) actual name
+        fn resolve_ty<'tcx>(
+            ctx: &FnCtxt<'_, 'tcx>,
+            typeck_results: &std::cell::Ref<'_, ty::TypeckResults<'tcx>>,
+            kind: hir::ExprKind<'_>,
+        ) -> Option<(Ty<'tcx>, HirId)> {
+            match kind {
+                hir::ExprKind::Path(hir::QPath::Resolved(
+                    _,
+                    hir::Path { res: crate::Res::Local(hir_id), .. },
+                )) => {
+                    let ty = typeck_results.node_type(*hir_id);
+                    let resolved_ty = ctx.resolve_vars_if_possible(ty);
+                    Some((resolved_ty, *hir_id))
+                }
+                _ => None,
+            }
+        }
+
+        let typeck_results = self.typeck_results.borrow();
+        match expr.kind {
+            hir::ExprKind::MethodCall(method, called_on, _arguments, span) => {
+                if !was_dereffed(&typeck_results, called_on) {
+                    return;
+                }
+                let Some((resolved_ty, _hir_id)) = resolve_ty(self, &typeck_results, called_on.kind)
+                else {
+                    return;
+                };
+
+                let Some((return_ty_in_org_types, method_span)) = self
+                    .probe_for_deref_mismatch_diagnostics(span, expected_ty, method, resolved_ty)
+                else {
+                    return; // no method with the same name in the not org type (not dereffed)
+                };
+                if return_ty_in_org_types != expected_ty {
+                    return;
+                };
+
+                err.help(format!("There is a private method `{}()` on `{resolved_ty}` with return type `{expected_ty}` consider making that public", method.ident));
+            }
+            hir::ExprKind::Field(field, requested_field) => {
+                if !was_dereffed(&typeck_results, field) {
+                    return;
+                }
+                let Some((resolved_ty, hir_id)) = resolve_ty(self, &typeck_results, field.kind) else {
+                    return;
+                };
+
+                // FIXME(yara) what about dereffing tuple structs? can that happen?
+                // FIXME(yara) add that to tests
+                // FIXME(yara) what about dereffing enums? can that happen?
+                match resolved_ty.kind() {
+                    ty::Adt(base_def, args) if !dbg!(base_def.is_enum()) => {
+                        let fields = &base_def.non_enum_variant().fields;
+                        let matching_private_field = fields
+                            .iter()
+                            .filter(|field| {
+                                let mod_id = self.tcx.parent_module(hir_id);
+                                !field.vis.is_accessible_from(mod_id, self.tcx)
+                                // FIXME(yara) is this span from the correct expr?
+                            })
+                            .filter(|field| {
+                                is_private_field_suggestable(self.tcx, field, expr.span)
+                            })
+                            // For compile-time reasons put a limit on number of fields we search
+                            .take(100)
+                            .find(|field| {
+                                // FIXME(yara) I stole this, do we need the
+                                // normalize macros 2.0? I think so?
+                                field.ident(self.tcx).name == requested_field.name
+                                    && field.ty(self.tcx, args) == expected_ty
+                            });
+
+                        if let Some(field) = matching_private_field {
+                            err.help(format!("There is a private field`{}()` on `{resolved_ty}` with type `{expected_ty}` consider making that public", field.ident(self.tcx)));
                         }
-                        _ => todo!(),
                     }
+                    _ => unreachable!("resolved_ty is the type of field so kind must be Adt"),
                 }
             }
             _ => (),
@@ -358,7 +401,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             Err(e) => e,
         };
 
-        dbg!(e);
         self.adjust_expr_for_assert_eq_macro(&mut expr, &mut expected_ty_expr);
 
         self.set_tainted_by_errors(self.dcx().span_delayed_bug(

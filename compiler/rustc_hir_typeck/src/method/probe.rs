@@ -272,6 +272,30 @@ pub(crate) enum ProbeScope {
 }
 
 impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
+    // FIXME(yara) put this somewhere where it makes sense
+    // FIXME(yara) make the name nicer
+    pub(crate) fn probe_for_deref_mismatch_diagnostics(
+        &self,
+        span: Span,
+        return_type: Ty<'tcx>,
+        method: &hir::PathSegment<'_>,
+        self_ty: Ty<'tcx>,
+    ) -> Option<(Ty<'tcx>, Span)> {
+        let matching_method_return_ty = self.probe_op(
+            span,
+            Mode::MethodCall,
+            Some(method.ident),
+            Some(return_type),
+            IsSuggestion(true),
+            self_ty,
+            method.hir_id, // scope_expr_id, // FIXME what is this?
+            ProbeScope::AllTraits,
+            |ctx| Ok(ctx.return_type.zip(Some(ctx.span))),
+        ).unwrap(); // FIXME can we do this?
+
+        return matching_method_return_ty
+    }
+
     /// This is used to offer suggestions to users. It returns methods
     /// that could have been called which have the desired return
     /// type. Some effort is made to rule out methods that, if called,
@@ -288,6 +312,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         scope_expr_id: HirId,
         candidate_filter: impl Fn(&ty::AssocItem) -> bool,
     ) -> Vec<ty::AssocItem> {
+        // FIXME(yara) probe for all methods?
         let method_names = self
             .probe_op(
                 span,
