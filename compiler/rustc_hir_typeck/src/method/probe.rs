@@ -280,20 +280,24 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         return_type: Ty<'tcx>,
         method: &hir::PathSegment<'_>,
         self_ty: Ty<'tcx>,
-    ) -> Option<(Ty<'tcx>, Span)> {
-        let matching_method_return_ty = self.probe_op(
-            span,
-            Mode::MethodCall,
-            Some(method.ident),
-            Some(return_type),
-            IsSuggestion(true),
-            self_ty,
-            method.hir_id, // scope_expr_id, // FIXME what is this?
-            ProbeScope::AllTraits,
-            |ctx| Ok(ctx.return_type.zip(Some(ctx.span))),
-        ).unwrap(); // FIXME can we do this?
+    ) -> Option<(Ty<'tcx>, DefId)> {
+        let matching_method_return_ty = self
+            .probe_op(
+                span,
+                Mode::MethodCall,
+                Some(method.ident),
+                Some(return_type),
+                IsSuggestion(true),
+                self_ty,
+                method.hir_id, // scope_expr_id, // FIXME what is this?
+                ProbeScope::AllTraits,
+                |ctx| {
+                    Ok(ctx.return_type.zip(ctx.private_candidate.get().map(|(_, def_id)| def_id)))
+                },
+            )
+            .unwrap(); // FIXME can we do this?
 
-        return matching_method_return_ty
+        return matching_method_return_ty;
     }
 
     /// This is used to offer suggestions to users. It returns methods

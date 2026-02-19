@@ -116,8 +116,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         expected_ty: Ty<'tcx>,
         expr: &hir::Expr<'_>,
     ) {
-        // FIXME(yara) do the same for methods
-        // FIXME(yara) should we deny any field from external crate?
+        // FIXME(yara) should we deny any field from external crate? no?
         fn is_private_field_suggestable<'tcx>(
             tcx: TyCtxt<'tcx>,
             field: &ty::FieldDef,
@@ -132,6 +131,23 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             && (field.did.is_local() || !tcx.is_doc_hidden(field.did))
             // If the field is hygienic it must come from the same syntax context.
             && tcx.def_ident_span(field.did).unwrap().normalize_to_macros_2_0().eq_ctxt(span)
+        }
+
+        // FIXME(yara) do the same for methods
+        fn is_private_method_suggestable<'tcx>(
+            tcx: TyCtxt<'tcx>,
+            method: hir::def_id::DefId,
+            span: Span,
+        ) -> bool {
+            // The method must not be unstable.
+            !matches!(
+                tcx.eval_stability(method, None, rustc_span::DUMMY_SP, None),
+                rustc_middle::middle::stability::EvalResult::Deny { .. }
+            )
+            // If the method is from an external crate it must not be `doc(hidden)`.
+            && (method.is_local() || !tcx.is_doc_hidden(method))
+            // If the method is hygienic it must come from the same syntax context.
+            && tcx.def_ident_span(method).unwrap().normalize_to_macros_2_0().eq_ctxt(span)
         }
 
         fn was_dereffed(
@@ -150,8 +166,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             }
         }
 
-        // FIXME(yara) actual name
-        fn resolve_ty<'tcx>(
+        fn resolved_type<'tcx>(
             ctx: &FnCtxt<'_, 'tcx>,
             typeck_results: &std::cell::Ref<'_, ty::TypeckResults<'tcx>>,
             kind: hir::ExprKind<'_>,
@@ -175,17 +190,23 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 if !was_dereffed(&typeck_results, called_on) {
                     return;
                 }
-                let Some((resolved_ty, _hir_id)) = resolve_ty(self, &typeck_results, called_on.kind)
+                let Some((resolved_ty, _hir_id)) =
+                    resolved_type(self, &typeck_results, called_on.kind)
                 else {
                     return;
                 };
 
-                let Some((return_ty_in_org_types, method_span)) = self
+                let Some((private_method_ret_type, private_method_def_id)) = self
                     .probe_for_deref_mismatch_diagnostics(span, expected_ty, method, resolved_ty)
                 else {
-                    return; // no method with the same name in the not org type (not dereffed)
+                    return; // no method with the same name in org (not dereffed) type
                 };
-                if return_ty_in_org_types != expected_ty {
+
+                if private_method_ret_type != expected_ty {
+                    return;
+                };
+
+                if !is_private_method_suggestable(self.tcx, private_method_def_id, expr.span) {
                     return;
                 };
 
@@ -195,7 +216,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 if !was_dereffed(&typeck_results, field) {
                     return;
                 }
-                let Some((resolved_ty, hir_id)) = resolve_ty(self, &typeck_results, field.kind) else {
+                let Some((resolved_ty, hir_id)) = resolved_type(self, &typeck_results, field.kind)
+                else {
                     return;
                 };
 
@@ -203,14 +225,13 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 // FIXME(yara) add that to tests
                 // FIXME(yara) what about dereffing enums? can that happen?
                 match resolved_ty.kind() {
-                    ty::Adt(base_def, args) if !dbg!(base_def.is_enum()) => {
+                    ty::Adt(base_def, args) if !base_def.is_enum() => {
                         let fields = &base_def.non_enum_variant().fields;
                         let matching_private_field = fields
                             .iter()
                             .filter(|field| {
                                 let mod_id = self.tcx.parent_module(hir_id);
                                 !field.vis.is_accessible_from(mod_id, self.tcx)
-                                // FIXME(yara) is this span from the correct expr?
                             })
                             .filter(|field| {
                                 is_private_field_suggestable(self.tcx, field, expr.span)
@@ -225,7 +246,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             });
 
                         if let Some(field) = matching_private_field {
-                            err.help(format!("There is a private field`{}()` on `{resolved_ty}` with type `{expected_ty}` consider making that public", field.ident(self.tcx)));
+                            err.help(format!("There is a private field `{}` on `{resolved_ty}` with type `{expected_ty}` consider making that public", field.ident(self.tcx)));
                         }
                     }
                     _ => unreachable!("resolved_ty is the type of field so kind must be Adt"),
