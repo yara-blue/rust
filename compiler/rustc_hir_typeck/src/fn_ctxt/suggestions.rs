@@ -2060,6 +2060,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         span: Span,
     ) -> bool {
         // The field must be visible in the containing module.
+        // TODO(yara): dedup
         field.vis.is_accessible_from(self.tcx.parent_module(hir_id), self.tcx)
             // The field must not be unstable.
             && !matches!(

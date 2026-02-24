@@ -298,25 +298,35 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         span: Span,
         return_type: Ty<'tcx>,
         method: &hir::PathSegment<'_>,
+        expr: hir::Expr<'_>,
         self_ty: Ty<'tcx>,
-    ) -> Option<(Ty<'tcx>, DefId)> {
-        let matching_method_return_ty = self
-            .probe_op(
-                span,
-                Mode::MethodCall,
-                Some(method.ident),
-                Some(return_type),
-                IsSuggestion(true),
-                self_ty,
-                method.hir_id, // scope_expr_id, // FIXME what is this?
-                ProbeScope::AllTraits,
-                |ctx| {
-                    Ok(ctx.return_type.zip(ctx.private_candidate.get().map(|(_, def_id)| def_id)))
-                },
-            )
-            .unwrap(); // FIXME can we do this?
-
-        return matching_method_return_ty;
+    ) -> Option<DefId> {
+        dbg!(self.tcx.sess.source_map().span_to_snippet(span));
+        dbg!(method);
+        self.probe_op(
+            dbg!(span),
+            Mode::MethodCall,
+            dbg!(Some(method.ident)), // eeeh does this limit things to the span of this ident?
+            Some(return_type),        // setting this sets a field in probe context.
+            // You can not rely on that
+            IsSuggestion(true),
+            dbg!(self_ty), // correct
+            // dbg!(method.hir_id), // no clue
+            dbg!(expr.hir_id),                                       // no clue
+            ProbeScope::Single(self_ty.ty_adt_def().unwrap().did()), // TODO try this with def ID
+            |ctx| {
+                dbg!(&ctx.inherent_candidates);
+                dbg!(ctx.extension_candidates);
+                dbg!(ctx.return_type);
+                dbg!(&ctx.private_candidate);
+                let def_id = &ctx.inherent_candidates.get(0).unwrap().item.def_id;
+                let span = self.tcx.def_span(def_id);
+                dbg!(&span);
+                dbg!(self.tcx.sess.source_map().span_to_snippet(span));
+                Ok(ctx.private_candidate.get().map(|(_, def_id)| def_id))
+            },
+        )
+        .unwrap_or_default()
     }
 
     /// This is used to offer suggestions to users. It returns methods

@@ -19,7 +19,6 @@ use super::method::probe;
 use crate::FnCtxt;
 
 impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
-    // FIXME(yara) do we need to add anything here?
     pub(crate) fn emit_type_mismatch_suggestions(
         &self,
         err: &mut Diag<'_>,
@@ -107,16 +106,15 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         self.suggest_method_call_on_range_literal(err, expr, expr_ty, expected);
         self.suggest_return_binding_for_missing_tail_expr(err, expr, expr_ty, expected);
         self.note_wrong_return_ty_due_to_generic_arg(err, expr, expr_ty);
-        self.note_type_is_deref(err, expected, expr);
+        self.note_dereferencing_over_matching_private_item(err, expected, expr);
     }
 
-    pub(crate) fn note_type_is_deref(
+    pub(crate) fn note_dereferencing_over_matching_private_item(
         &self,
         err: &mut Diag<'_>,
         expected_ty: Ty<'tcx>,
         expr: &hir::Expr<'_>,
     ) {
-        // FIXME(yara) should we deny any field from external crate? no?
         fn is_private_field_suggestable<'tcx>(
             tcx: TyCtxt<'tcx>,
             field: &ty::FieldDef,
@@ -133,7 +131,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             && tcx.def_ident_span(field.did).unwrap().normalize_to_macros_2_0().eq_ctxt(span)
         }
 
-        // FIXME(yara) do the same for methods
         fn is_private_method_suggestable<'tcx>(
             tcx: TyCtxt<'tcx>,
             method: hir::def_id::DefId,
@@ -150,7 +147,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             && tcx.def_ident_span(method).unwrap().normalize_to_macros_2_0().eq_ctxt(span)
         }
 
-        fn was_dereffed(
+        fn was_dereferenced(
             typeck_results: &std::cell::Ref<'_, ty::TypeckResults<'_>>,
             field: &hir::Expr<'_>,
         ) -> bool {
@@ -186,34 +183,44 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         let typeck_results = self.typeck_results.borrow();
         match expr.kind {
-            hir::ExprKind::MethodCall(method, called_on, _arguments, span) => {
-                if !was_dereffed(&typeck_results, called_on) {
+            hir::ExprKind::MethodCall(method, called_on, _, span) => {
+                if !was_dereferenced(&typeck_results, called_on) {
                     return;
                 }
-                let Some((resolved_ty, _hir_id)) =
-                    resolved_type(self, &typeck_results, called_on.kind)
+                let Some((self_ty, hir_id)) = resolved_type(self, &typeck_results, called_on.kind)
                 else {
                     return;
                 };
 
-                let Some((private_method_ret_type, private_method_def_id)) = self
-                    .probe_for_deref_mismatch_diagnostics(span, expected_ty, method, resolved_ty)
-                else {
-                    return; // no method with the same name in org (not dereffed) type
-                };
-
-                if private_method_ret_type != expected_ty {
+                let Some(private_method_def_id) = self.list_methods_for_type(self_ty) else {
                     return;
                 };
+                // let self_def_id =
+                //     self_ty.ty_adt_def().expect("A method call only makes sense on an Adt").did();
+                // let Some(private_method_def_id) = self.probe_for_deref_mismatch_diagnostics(
+                //     span,
+                //     expected_ty,
+                //     method,
+                //     *expr,
+                //     self_ty,
+                // ) else {
+                //     dbg!();
+                //     return; // no method with the same name in the type we dereferenced from
+                // };
 
+                dbg!();
                 if !is_private_method_suggestable(self.tcx, private_method_def_id, expr.span) {
                     return;
                 };
-
-                err.help(format!("There is a private method `{}()` on `{resolved_ty}` with return type `{expected_ty}` consider making that public", method.ident));
+                let span = self.tcx.def_span(private_method_def_id);
+                err.span_suggestion(span,
+                    format!("There is a private method `{}()` on `{self_ty}` with return type `{expected_ty}` consider making that public", method.ident),
+                    format!("pub {}", self.tcx.sess.source_map().span_to_snippet(span).expect("Span is not ill formed span")),
+                    Applicability::MaybeIncorrect
+                );
             }
             hir::ExprKind::Field(field, requested_field) => {
-                if !was_dereffed(&typeck_results, field) {
+                if !was_dereferenced(&typeck_results, field) {
                     return;
                 }
                 let Some((resolved_ty, hir_id)) = resolved_type(self, &typeck_results, field.kind)
@@ -221,7 +228,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     return;
                 };
 
-                // FIXME(yara) what about dereffing tuple structs? can that happen?
+                // FIXME(yara) what about derefing tuple structs? can that happen?
                 // FIXME(yara) add that to tests
                 // FIXME(yara) what about dereffing enums? can that happen?
                 match resolved_ty.kind() {
@@ -239,14 +246,18 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             // For compile-time reasons put a limit on number of fields we search
                             .take(100)
                             .find(|field| {
-                                // FIXME(yara) I stole this, do we need the
-                                // normalize macros 2.0? I think so?
                                 field.ident(self.tcx).name == requested_field.name
                                     && field.ty(self.tcx, args) == expected_ty
                             });
 
                         if let Some(field) = matching_private_field {
-                            err.help(format!("There is a private field `{}` on `{resolved_ty}` with type `{expected_ty}` consider making that public", field.ident(self.tcx)));
+                            let span = self.tcx.def_span(field.did);
+                            err.span_suggestion(span, // DevSpan
+                                format!("There is a private field `{}` on `{resolved_ty}` with type `{expected_ty}`",
+                                field.ident(self.tcx)),
+                                format!("pub {}", self.tcx.sess.source_map().span_to_snippet(span).expect("Span is not ill formed span")),
+                                Applicability::MaybeIncorrect
+                            );
                         }
                     }
                     _ => unreachable!("resolved_ty is the type of field so kind must be Adt"),
