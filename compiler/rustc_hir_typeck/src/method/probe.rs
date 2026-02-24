@@ -272,6 +272,25 @@ pub(crate) enum ProbeScope {
 }
 
 impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
+    // TODO name and actual filtering
+    pub(crate) fn list_methods_for_type(&self, ty: Ty<'tcx>) -> Option<DefId> {
+        let ty = ty.ty_adt_def().unwrap().did();
+        let ty_impls = self.tcx.inherent_impls(ty);
+        for ty_impl in ty_impls {
+            let items = self.tcx.associated_items(ty_impl);
+            // TODO this is not recommended for new stuff use something else
+            let mut items = items.in_definition_order();
+            let item = items.next().unwrap();
+            // let span = self.tcx.def_span(item.def_id);
+            // dbg!(&span);
+            // dbg!(self.tcx.sess.source_map().span_to_snippet(span));
+            return Some(item.def_id)
+        }
+        None
+        // def_id needs to be an impl block it seems
+        // let item = self.tcx.associated_items(def_id);
+    }
+
     // FIXME(yara) put this somewhere where it makes sense
     // FIXME(yara) make the name nicer
     pub(crate) fn probe_for_deref_mismatch_diagnostics(
