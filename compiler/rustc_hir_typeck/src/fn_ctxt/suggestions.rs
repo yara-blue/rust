@@ -1900,7 +1900,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     assoc_item.container == ty::AssocContainer::Trait
                         && assoc_item.container_id(self.tcx) == clone_trait_did
                 })
-            // FIXME(yara) for defer
             // If that clone call hasn't already dereferenced the self type (i.e. don't give this
             // diagnostic in cases where we have `(&&T).clone()` and we expect `T`).
             && !results.expr_adjustments(callee_expr).iter().any(|adj| matches!(adj.kind, ty::adjustment::Adjust::Deref(..)))

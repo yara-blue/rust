@@ -187,34 +187,23 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 if !was_dereferenced(&typeck_results, called_on) {
                     return;
                 }
-                let Some((self_ty, hir_id)) = resolved_type(self, &typeck_results, called_on.kind)
+                let Some((self_ty, _)) = resolved_type(self, &typeck_results, called_on.kind)
                 else {
                     return;
                 };
 
-                let Some(private_method_def_id) = self.list_methods_for_type(self_ty) else {
+                let Some(private_method) =
+                    self.probe_for_method_matching(self_ty, method.ident.name, expected_ty, span)
+                else {
                     return;
                 };
-                // let self_def_id =
-                //     self_ty.ty_adt_def().expect("A method call only makes sense on an Adt").did();
-                // let Some(private_method_def_id) = self.probe_for_deref_mismatch_diagnostics(
-                //     span,
-                //     expected_ty,
-                //     method,
-                //     *expr,
-                //     self_ty,
-                // ) else {
-                //     dbg!();
-                //     return; // no method with the same name in the type we dereferenced from
-                // };
 
-                dbg!();
-                if !is_private_method_suggestable(self.tcx, private_method_def_id, expr.span) {
+                if !is_private_method_suggestable(self.tcx, private_method.def_id, expr.span) {
                     return;
                 };
-                let span = self.tcx.def_span(private_method_def_id);
+                let span = self.tcx.def_span(private_method.def_id);
                 err.span_suggestion(span,
-                    format!("There is a private method `{}()` on `{self_ty}` with return type `{expected_ty}` consider making that public", method.ident),
+                    format!("There is a private method `{}()` on `{self_ty}` with return type `{expected_ty}`", method.ident),
                     format!("pub {}", self.tcx.sess.source_map().span_to_snippet(span).expect("Span is not ill formed span")),
                     Applicability::MaybeIncorrect
                 );
@@ -252,7 +241,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
                         if let Some(field) = matching_private_field {
                             let span = self.tcx.def_span(field.did);
-                            err.span_suggestion(span, // DevSpan
+                            err.span_suggestion(span,
                                 format!("There is a private field `{}` on `{resolved_ty}` with type `{expected_ty}`",
                                 field.ident(self.tcx)),
                                 format!("pub {}", self.tcx.sess.source_map().span_to_snippet(span).expect("Span is not ill formed span")),
@@ -421,7 +410,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         mut expected_ty_expr: Option<&'tcx hir::Expr<'tcx>>,
         allow_two_phase: AllowTwoPhase,
     ) -> Result<Ty<'tcx>, Diag<'a>> {
-        // FIXME(yara) why do we not emit errors like annotate_alternative_method_deref here?
         let expected = if self.next_trait_solver() {
             expected
         } else {
@@ -445,7 +433,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let mut err =
             self.err_ctxt().report_mismatched_types(&cause, self.param_env, expected, expr_ty, e);
 
-        // FIXME(yara) trace
         self.emit_coerce_suggestions(&mut err, expr, expr_ty, expected, expected_ty_expr, Some(e));
 
         Err(err)

@@ -272,61 +272,49 @@ pub(crate) enum ProbeScope {
 }
 
 impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
-    // TODO name and actual filtering
-    pub(crate) fn list_methods_for_type(&self, ty: Ty<'tcx>) -> Option<DefId> {
-        let ty = ty.ty_adt_def().unwrap().did();
-        let ty_impls = self.tcx.inherent_impls(ty);
-        for ty_impl in ty_impls {
-            let items = self.tcx.associated_items(ty_impl);
-            // TODO this is not recommended for new stuff use something else
-            let mut items = items.in_definition_order();
-            let item = items.next().unwrap();
-            // let span = self.tcx.def_span(item.def_id);
-            // dbg!(&span);
-            // dbg!(self.tcx.sess.source_map().span_to_snippet(span));
-            return Some(item.def_id)
+    fn matches_return_type(&self, method: &ty::AssocItem, expected: Ty<'tcx>, span: Span) -> bool {
+        match method.kind {
+            ty::AssocKind::Fn { .. } => self.probe(|_| {
+                let args = self.fresh_args_for_item(span, method.def_id);
+                let fty = self.tcx.fn_sig(method.def_id).instantiate(self.tcx, args);
+                let fty = self.instantiate_binder_with_fresh_vars(
+                    span,
+                    BoundRegionConversionTime::FnCall,
+                    fty,
+                );
+                self.can_eq(self.param_env, fty.output(), expected)
+            }),
+            _ => false,
         }
-        None
-        // def_id needs to be an impl block it seems
-        // let item = self.tcx.associated_items(def_id);
     }
 
-    // FIXME(yara) put this somewhere where it makes sense
-    // FIXME(yara) make the name nicer
-    pub(crate) fn probe_for_deref_mismatch_diagnostics(
+    /// When the return type of a method on a dereferenced item does not match
+    /// it could be the user never ment to dereference. We use this to see if
+    /// there is a suitable method on the undereferenced type. Then we suggest
+    /// it can be made public.
+    pub(crate) fn probe_for_method_matching(
         &self,
+        ty: Ty<'tcx>,
+        required_name: Symbol,
+        required_ret_ty: Ty<'tcx>,
         span: Span,
-        return_type: Ty<'tcx>,
-        method: &hir::PathSegment<'_>,
-        expr: hir::Expr<'_>,
-        self_ty: Ty<'tcx>,
-    ) -> Option<DefId> {
-        dbg!(self.tcx.sess.source_map().span_to_snippet(span));
-        dbg!(method);
-        self.probe_op(
-            dbg!(span),
-            Mode::MethodCall,
-            dbg!(Some(method.ident)), // eeeh does this limit things to the span of this ident?
-            Some(return_type),        // setting this sets a field in probe context.
-            // You can not rely on that
-            IsSuggestion(true),
-            dbg!(self_ty), // correct
-            // dbg!(method.hir_id), // no clue
-            dbg!(expr.hir_id),                                       // no clue
-            ProbeScope::Single(self_ty.ty_adt_def().unwrap().did()), // TODO try this with def ID
-            |ctx| {
-                dbg!(&ctx.inherent_candidates);
-                dbg!(ctx.extension_candidates);
-                dbg!(ctx.return_type);
-                dbg!(&ctx.private_candidate);
-                let def_id = &ctx.inherent_candidates.get(0).unwrap().item.def_id;
-                let span = self.tcx.def_span(def_id);
-                dbg!(&span);
-                dbg!(self.tcx.sess.source_map().span_to_snippet(span));
-                Ok(ctx.private_candidate.get().map(|(_, def_id)| def_id))
-            },
-        )
-        .unwrap_or_default()
+    ) -> Option<&AssocItem> {
+        let ty = ty.ty_adt_def().unwrap().did();
+        let ty_impls = self.tcx.inherent_impls(ty);
+
+        ty_impls
+            .iter()
+            .flat_map(|ty_impl| self.tcx.associated_items(ty_impl).in_definition_order())
+            .find_map(|item| {
+                if let ty::AssocKind::Fn { name, has_self: true } = item.kind
+                    && name == required_name
+                    && self.matches_return_type(item, required_ret_ty, span)
+                {
+                    Some(item)
+                } else {
+                    None
+                }
+            })
     }
 
     /// This is used to offer suggestions to users. It returns methods
@@ -345,7 +333,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         scope_expr_id: HirId,
         candidate_filter: impl Fn(&ty::AssocItem) -> bool,
     ) -> Vec<ty::AssocItem> {
-        // FIXME(yara) probe for all methods?
         let method_names = self
             .probe_op(
                 span,
@@ -1123,22 +1110,6 @@ impl<'a, 'tcx> ProbeContext<'a, 'tcx> {
         }
     }
 
-    fn matches_return_type(&self, method: ty::AssocItem, expected: Ty<'tcx>) -> bool {
-        match method.kind {
-            ty::AssocKind::Fn { .. } => self.probe(|_| {
-                let args = self.fresh_args_for_item(self.span, method.def_id);
-                let fty = self.tcx.fn_sig(method.def_id).instantiate(self.tcx, args);
-                let fty = self.instantiate_binder_with_fresh_vars(
-                    self.span,
-                    BoundRegionConversionTime::FnCall,
-                    fty,
-                );
-                self.can_eq(self.param_env, fty.output(), expected)
-            }),
-            _ => false,
-        }
-    }
-
     #[instrument(level = "debug", skip(self))]
     fn assemble_extension_candidates_for_trait(
         &mut self,
@@ -1209,7 +1180,7 @@ impl<'a, 'tcx> ProbeContext<'a, 'tcx> {
             .filter(|candidate| candidate_filter(&candidate.item))
             .filter(|candidate| {
                 if let Some(return_ty) = self.return_type {
-                    self.matches_return_type(candidate.item, return_ty)
+                    self.fcx.matches_return_type(&candidate.item, return_ty, self.span)
                 } else {
                     true
                 }
