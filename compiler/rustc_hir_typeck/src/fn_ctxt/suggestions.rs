@@ -2052,24 +2052,30 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         }
     }
 
+    pub(crate) fn is_possibly_private_item_suggestable(
+        &self,
+        did: hir::def_id::DefId,
+        span: Span,
+    ) -> bool {
+        // The field must not be unstable.
+        !matches!(
+            self.tcx.eval_stability(did, None, rustc_span::DUMMY_SP, None),
+            rustc_middle::middle::stability::EvalResult::Deny { .. }
+        )
+        // If the field is from an external crate it must not be `doc(hidden)`.
+        && (did.is_local() || !self.tcx.is_doc_hidden(did))
+        // If the field is hygienic it must come from the same syntax context.
+        && self.tcx.def_ident_span(did).unwrap().normalize_to_macros_2_0().eq_ctxt(span)
+    }
+
     pub(crate) fn is_field_suggestable(
         &self,
         field: &ty::FieldDef,
         hir_id: HirId,
         span: Span,
     ) -> bool {
-        // The field must be visible in the containing module.
-        // TODO(yara): dedup
-        field.vis.is_accessible_from(self.tcx.parent_module(hir_id), self.tcx)
-            // The field must not be unstable.
-            && !matches!(
-                self.tcx.eval_stability(field.did, None, rustc_span::DUMMY_SP, None),
-                rustc_middle::middle::stability::EvalResult::Deny { .. }
-            )
-            // If the field is from an external crate it must not be `doc(hidden)`.
-            && (field.did.is_local() || !self.tcx.is_doc_hidden(field.did))
-            // If the field is hygienic it must come from the same syntax context.
-            && self.tcx.def_ident_span(field.did).unwrap().normalize_to_macros_2_0().eq_ctxt(span)
+        // The field must be visible in the containing module and otherwise suggestable
+        field.vis.is_accessible_from(self.tcx.parent_module(hir_id), self.tcx) && self.is_possibly_private_item_suggestable(field.did, span)
     }
 
     pub(crate) fn suggest_missing_unwrap_expect(

@@ -8,7 +8,7 @@ use rustc_middle::ty::adjustment::AllowTwoPhase;
 use rustc_middle::ty::error::{ExpectedFound, TypeError};
 use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::{
-    self, AssocItem, BottomUpFolder, Ty, TyCtxt, TypeFoldable, TypeVisitableExt,
+    self, AssocItem, BottomUpFolder, Ty, TypeFoldable, TypeVisitableExt,
 };
 use rustc_span::{DUMMY_SP, Ident, Span, sym};
 use rustc_trait_selection::infer::InferCtxtExt;
@@ -115,38 +115,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         expected_ty: Ty<'tcx>,
         expr: &hir::Expr<'_>,
     ) {
-        fn is_private_field_suggestable<'tcx>(
-            tcx: TyCtxt<'tcx>,
-            field: &ty::FieldDef,
-            span: Span,
-        ) -> bool {
-            // The field must not be unstable.
-            !matches!(
-                tcx.eval_stability(field.did, None, rustc_span::DUMMY_SP, None),
-                rustc_middle::middle::stability::EvalResult::Deny { .. }
-            )
-            // If the field is from an external crate it must not be `doc(hidden)`.
-            && (field.did.is_local() || !tcx.is_doc_hidden(field.did))
-            // If the field is hygienic it must come from the same syntax context.
-            && tcx.def_ident_span(field.did).unwrap().normalize_to_macros_2_0().eq_ctxt(span)
-        }
-
-        fn is_private_method_suggestable<'tcx>(
-            tcx: TyCtxt<'tcx>,
-            method: hir::def_id::DefId,
-            span: Span,
-        ) -> bool {
-            // The method must not be unstable.
-            !matches!(
-                tcx.eval_stability(method, None, rustc_span::DUMMY_SP, None),
-                rustc_middle::middle::stability::EvalResult::Deny { .. }
-            )
-            // If the method is from an external crate it must not be `doc(hidden)`.
-            && (method.is_local() || !tcx.is_doc_hidden(method))
-            // If the method is hygienic it must come from the same syntax context.
-            && tcx.def_ident_span(method).unwrap().normalize_to_macros_2_0().eq_ctxt(span)
-        }
-
         fn was_dereferenced(
             typeck_results: &std::cell::Ref<'_, ty::TypeckResults<'_>>,
             field: &hir::Expr<'_>,
@@ -198,12 +166,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     return;
                 };
 
-                if !is_private_method_suggestable(self.tcx, private_method.def_id, expr.span) {
+                if !self.is_possibly_private_item_suggestable(private_method.def_id, expr.span) {
                     return;
                 };
                 let span = self.tcx.def_span(private_method.def_id);
                 err.span_suggestion(span,
-                    format!("There is a private method `{}()` on `{self_ty}` with return type `{expected_ty}`", method.ident),
+                    format!("there is a private method `{}()` on `{self_ty}` with return type `{expected_ty}`", method.ident),
                     format!("pub {}", self.tcx.sess.source_map().span_to_snippet(span).expect("Span is not ill formed span")),
                     Applicability::MaybeIncorrect
                 );
@@ -230,7 +198,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                                 !field.vis.is_accessible_from(mod_id, self.tcx)
                             })
                             .filter(|field| {
-                                is_private_field_suggestable(self.tcx, field, expr.span)
+                                self.is_possibly_private_item_suggestable(field.did, expr.span)
                             })
                             // For compile-time reasons put a limit on number of fields we search
                             .take(100)
@@ -242,7 +210,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         if let Some(field) = matching_private_field {
                             let span = self.tcx.def_span(field.did);
                             err.span_suggestion(span,
-                                format!("There is a private field `{}` on `{resolved_ty}` with type `{expected_ty}`",
+                                format!("there is a private field `{}` on `{resolved_ty}` with type `{expected_ty}`",
                                 field.ident(self.tcx)),
                                 format!("pub {}", self.tcx.sess.source_map().span_to_snippet(span).expect("Span is not ill formed span")),
                                 Applicability::MaybeIncorrect
