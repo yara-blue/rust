@@ -7,9 +7,7 @@ use rustc_middle::bug;
 use rustc_middle::ty::adjustment::AllowTwoPhase;
 use rustc_middle::ty::error::{ExpectedFound, TypeError};
 use rustc_middle::ty::print::with_no_trimmed_paths;
-use rustc_middle::ty::{
-    self, AssocItem, BottomUpFolder, Ty, TypeFoldable, TypeVisitableExt,
-};
+use rustc_middle::ty::{self, AssocItem, BottomUpFolder, Ty, TypeFoldable, TypeVisitableExt};
 use rustc_span::{DUMMY_SP, Ident, Span, sym};
 use rustc_trait_selection::infer::InferCtxtExt;
 use rustc_trait_selection::traits::ObligationCause;
@@ -113,21 +111,21 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         &self,
         err: &mut Diag<'_>,
         expected_ty: Ty<'tcx>,
-        expr: &hir::Expr<'_>,
+        expr: &hir::Expr<'tcx>,
     ) {
-        fn was_dereferenced(
-            typeck_results: &std::cell::Ref<'_, ty::TypeckResults<'_>>,
-            field: &hir::Expr<'_>,
-        ) -> bool {
+        fn was_dereferenced<'tcx>(
+            typeck_results: &std::cell::Ref<'_, ty::TypeckResults<'tcx>>,
+            field: &hir::Expr<'tcx>,
+        ) -> Option<Ty<'tcx>> {
             let adjustment = typeck_results.expr_adjustments(field);
             if let Some(ty::adjustment::Adjustment {
                 kind: ty::adjustment::Adjust::Deref(ty::adjustment::DerefAdjustKind::Overloaded(_)),
-                ..
+                target,
             }) = adjustment.first()
             {
-                true
+                Some(*target)
             } else {
-                false
+                None
             }
         }
 
@@ -152,13 +150,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let typeck_results = self.typeck_results.borrow();
         match expr.kind {
             hir::ExprKind::MethodCall(method, called_on, _, span) => {
-                if !was_dereferenced(&typeck_results, called_on) {
+                let Some(deref_target) = was_dereferenced(&typeck_results, called_on) else {
                     return;
-                }
+                };
                 let Some((self_ty, _)) = resolved_type(self, &typeck_results, called_on.kind)
                 else {
                     return;
                 };
+                dbg!(self_ty);
 
                 let Some(private_method) =
                     self.probe_for_method_matching(self_ty, method.ident.name, expected_ty, span)
@@ -170,24 +169,23 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     return;
                 };
                 let span = self.tcx.def_span(private_method.def_id);
+                dbg!(called_on);
+                let method_name = method.ident;
                 err.span_suggestion(span,
-                    format!("there is a private method `{}()` on `{self_ty}` with return type `{expected_ty}`", method.ident),
+                    format!("method `{method_name}` on `{self_ty}` returning `{expected_ty}` is private. `{self_ty}` automatically dereferences to `{deref_target}` which does have a public method`{method_name}`. Did you mean to make the method on `{self_ty}` public?"),
                     format!("pub {}", self.tcx.sess.source_map().span_to_snippet(span).expect("Span is not ill formed span")),
                     Applicability::MaybeIncorrect
                 );
             }
             hir::ExprKind::Field(field, requested_field) => {
-                if !was_dereferenced(&typeck_results, field) {
+                let Some(deref_target) = was_dereferenced(&typeck_results, field) else {
                     return;
-                }
+                };
                 let Some((resolved_ty, hir_id)) = resolved_type(self, &typeck_results, field.kind)
                 else {
                     return;
                 };
 
-                // FIXME(yara) what about derefing tuple structs? can that happen?
-                // FIXME(yara) add that to tests
-                // FIXME(yara) what about dereffing enums? can that happen?
                 match resolved_ty.kind() {
                     ty::Adt(base_def, args) if !base_def.is_enum() => {
                         let fields = &base_def.non_enum_variant().fields;
@@ -208,13 +206,27 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             });
 
                         if let Some(field) = matching_private_field {
+                            let field_name = field.ident(self.tcx).name;
                             let span = self.tcx.def_span(field.did);
                             err.span_suggestion(span,
-                                format!("there is a private field `{}` on `{resolved_ty}` with type `{expected_ty}`",
-                                field.ident(self.tcx)),
+                                // TODO span on field_name and expected type and resolved type
+                                // mention its the deref or deref_mut trait
+                                // on the dot put a message that we are dereferencing there
+                                // something like {type left} dereferences to {deref_target}
+                                // then we can do away with most of the message
+                                // link the Deref or DerefMut page
+                                //
+                                // smthg like
+                                // let res: usize = star.earth; //~ ERROR mismatched types
+                                //                  |    ^
+                                //                  |   dereferences to {deref_target}
+                                //                  | has type {resolved_ty}
+                                format!("field `{field_name}` with type `{expected_ty}` on `{resolved_ty}` is private. `{resolved_ty}` automatically dereferenced to `{deref_target}` which does have a public field `{field_name}`. Did you mean to make the field on `{resolved_ty}` public?"),
                                 format!("pub {}", self.tcx.sess.source_map().span_to_snippet(span).expect("Span is not ill formed span")),
                                 Applicability::MaybeIncorrect
                             );
+                            err.span_label(span, "hi");
+                            // diag.span_note(span, msg);
                         }
                     }
                     _ => unreachable!("resolved_ty is the type of field so kind must be Adt"),

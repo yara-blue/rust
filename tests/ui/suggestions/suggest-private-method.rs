@@ -1,3 +1,10 @@
+// names
+// suggest making field public when deref
+// on deref because field private suggest making it public
+// suggest private field on deref failure
+// on deref because field was public suggest private
+// suggest making field public instead of autoderef
+
 mod structs {
     pub struct Sun {
         // this is the field we want but can't get as it's not pub

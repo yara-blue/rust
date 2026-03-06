@@ -2075,7 +2075,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         span: Span,
     ) -> bool {
         // The field must be visible in the containing module and otherwise suggestable
-        field.vis.is_accessible_from(self.tcx.parent_module(hir_id), self.tcx) && self.is_possibly_private_item_suggestable(field.did, span)
+        field.vis.is_accessible_from(self.tcx.parent_module(hir_id), self.tcx)
+            && self.is_possibly_private_item_suggestable(field.did, span)
     }
 
     pub(crate) fn suggest_missing_unwrap_expect(
