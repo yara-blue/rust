@@ -3,7 +3,7 @@
 
 use crate::any::TypeId;
 use crate::fmt;
-use crate::intrinsics::{self, type_id, type_of};
+use crate::intrinsics;
 use crate::marker::PointeeSized;
 use crate::ptr::DynMetadata;
 
@@ -38,7 +38,7 @@ impl TypeId {
     #[rustc_const_unstable(feature = "type_info", issue = "146922")]
     #[rustc_comptime]
     pub fn info(self) -> Type {
-        type_of(self)
+        intrinsics::type_of(self)
     }
 }
 
@@ -54,7 +54,7 @@ impl Type {
     #[unstable(feature = "type_info", issue = "146922")]
     #[rustc_const_unstable(feature = "type_info", issue = "146922")]
     pub const fn of<T: ?Sized>() -> Self {
-        const { type_id::<T>().info() }
+        const { intrinsics::type_id::<T>().info() }
     }
 }
 
@@ -566,7 +566,7 @@ impl TypeId {
     #[rustc_const_unstable(feature = "type_info", issue = "146922")]
     #[rustc_comptime]
     pub fn non_exhaustive(self) -> bool {
-        intrinsics::non_exhaustive(self)
+        intrinsics::type_id_non_exhaustive(self)
     }
 
     /// Returns a list of generic parameters of the type.
@@ -696,7 +696,7 @@ impl VariantId {
     #[rustc_const_unstable(feature = "type_info", issue = "146922")]
     #[rustc_comptime]
     pub fn name(self) -> &'static str {
-        intrinsics::variant_name(self.base, self.variant)
+        intrinsics::type_id_variant_name(self.base, self.variant)
     }
 
     /// Returns whether this variant is marked with `#[non_exhaustive]`.
@@ -743,7 +743,7 @@ impl FieldId {
     #[rustc_const_unstable(feature = "type_info", issue = "146922")]
     #[rustc_comptime]
     pub fn type_id(self) -> TypeId {
-        intrinsics::field_representing_type_actual_type_id(self.frt_type_id)
+        intrinsics::type_id_field_type(self.frt_type_id)
     }
 
     /// Returns the name of the field.
@@ -765,7 +765,7 @@ impl FieldId {
     #[rustc_const_unstable(feature = "type_info", issue = "146922")]
     #[rustc_comptime]
     pub fn name(self) -> &'static str {
-        intrinsics::field_representing_type_name(self.frt_type_id)
+        intrinsics::type_id_field_name(self.frt_type_id)
     }
     /// Returns the offset of the field wrt to its containing type.
     ///
@@ -787,6 +787,6 @@ impl FieldId {
     #[rustc_const_unstable(feature = "type_info", issue = "146922")]
     #[rustc_comptime]
     pub fn offset(self) -> usize {
-        intrinsics::field_representing_type_offset(self.frt_type_id)
+        intrinsics::type_id_field_offset(self.frt_type_id)
     }
 }
