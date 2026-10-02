@@ -750,6 +750,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 let discr_ty = rvalue.ty(self.mir, bx.tcx());
                 let discr_ty = self.monomorphize(discr_ty);
                 let operand = self.codegen_consume(bx, place.as_ref());
+                // TODO the thing we want
                 let discr = operand.codegen_get_discr(self, bx, discr_ty);
                 OperandRef {
                     val: OperandValue::Immediate(discr),

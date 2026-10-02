@@ -181,6 +181,8 @@ impl<'tcx> crate::MirPass<'tcx> for LowerIntrinsics {
                         }
                     }
                     // `write_via_move` is already lowered during MIR building.
+                    // TODO duplicate this and remove the Typed part or something?
+                    // probably as a method on VariantId.
                     sym::discriminant_value => {
                         let target = target.unwrap();
                         let Ok([arg]) = take_array(args) else {

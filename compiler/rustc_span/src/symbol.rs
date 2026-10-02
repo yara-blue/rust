@@ -2222,6 +2222,7 @@ symbols! {
         type_id_function_ptr,
         type_id_generics,
         type_id_is_signed,
+        type_id_name,
         type_id_non_exhaustive,
         type_id_points_mutably,
         type_id_points_to,

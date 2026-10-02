@@ -3,6 +3,7 @@ use std::fmt::Write;
 use rustc_data_structures::intern::Interned;
 use rustc_hir::def_id::{CrateNum, DefId};
 use rustc_hir::definitions::DisambiguatedDefPathData;
+use rustc_middle::ty::consts::ConstExt;
 use rustc_middle::ty::print::{PrettyPrinter, PrintError, Printer};
 use rustc_middle::ty::{self, GenericArg, Ty, TyCtxt};
 use rustc_span::bug;
@@ -217,4 +218,64 @@ pub fn type_name<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> String {
     let mut p = TypeNamePrinter { tcx, path: String::new() };
     p.print_type(ty).unwrap();
     p.path
+}
+
+pub fn fluffy<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> String {
+    let mut s = String::new();
+
+    fn cutie<'tcx>(ty: Ty<'tcx>, s: &mut String, tcx: TyCtxt<'tcx>) -> std::fmt::Result {
+        match *ty.kind() {
+            ty::Adt(def, args) if def.field_representing_type_info(tcx, args).is_some() => (),
+            ty::Adt(def, _) => write!(s, "{}", tcx.item_name(def.did()))?,
+            ty::Dynamic(data, _) => {
+                let trait_def_id = data
+                    .iter()
+                    .map(|b| b.skip_binder())
+                    .find_map(|pred| match pred {
+                        ty::ExistentialPredicate::Trait(tr) => Some(tr.def_id),
+                        _ => None,
+                    })
+                    .expect("There should be a principal trait");
+                write!(s, "{}", tcx.item_name(trait_def_id))?;
+            }
+            ty::Array(ty, sz) => {
+                write!(s, "[")?;
+                cutie(ty, s, tcx)?;
+                write!(s, "; {}]", sz.to_value().to_leaf().to_target_usize(tcx))?;
+            }
+            ty::Slice(ty) => {
+                write!(s, "[")?;
+                cutie(ty, s, tcx)?;
+                write!(s, "]")?;
+            }
+            ty::Alias(..)
+            | ty::UnsafeBinder(..)
+            | ty::Bool
+            | ty::Bound(..)
+            | ty::Char
+            | ty::Closure(..)
+            | ty::Coroutine(..)
+            | ty::CoroutineClosure(..)
+            | ty::CoroutineWitness(..)
+            | ty::Str
+            | ty::Error(..)
+            | ty::Placeholder(..)
+            | ty::Foreign(..)
+            | ty::Never
+            | ty::Float(..)
+            | ty::FnDef(..)
+            | ty::FnPtr(..)
+            | ty::Infer(..)
+            | ty::Int(..)
+            | ty::Param(..)
+            | ty::Pat(..)
+            | ty::Ref(..)
+            | ty::RawPtr(..)
+            | ty::Tuple(..)
+            | ty::Uint(..) => (),
+        }
+        Ok(())
+    }
+    cutie(ty, &mut s, tcx).unwrap();
+    s
 }

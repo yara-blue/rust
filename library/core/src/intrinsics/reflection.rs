@@ -192,3 +192,13 @@ pub fn type_id_points_mutably(_id: crate::any::TypeId) -> bool;
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_comptime]
 pub fn type_id_function_ptr(_type_id: crate::any::TypeId) -> Option<crate::mem::type_info::FnPtr>;
+
+/// Given a `TypeId` that represents a named item returns an non empty string
+/// containing the name. When called on something without a name returns the
+/// empty string.
+///
+/// The more user-friendly version of this intrinsic is [`core::any::TypeId::name`].
+#[rustc_intrinsic]
+#[unstable(feature = "core_intrinsics", issue = "none")]
+#[rustc_comptime]
+pub fn type_id_name(_type_id: crate::any::TypeId) -> &'static str;

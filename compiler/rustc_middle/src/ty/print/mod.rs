@@ -143,6 +143,10 @@ pub trait Printer<'tcx>: Sized {
         false
     }
 
+    fn should_omit_path(&self) -> bool {
+        false
+    }
+
     // Defaults (should not be overridden):
     #[instrument(skip(self), level = "debug")]
     fn default_print_def_path(

@@ -23,6 +23,7 @@ use tracing::debug;
 
 use super::error::*;
 use crate::diagnostics::{LongRunning, LongRunningWarn};
+use crate::interpret::Immediate::ScalarPair;
 use crate::interpret::{
     self, AllocId, AllocInit, AllocRange, ConstAllocation, CtfeProvenance, FnArg, Frame,
     GlobalAlloc, ImmTy, Immediate, InterpCx, InterpResult, OpTy, PlaceTy, Pointer, RangeSet,
@@ -785,6 +786,20 @@ impl<'tcx> interpret::Machine<'tcx> for CompileTimeMachine<'tcx> {
                     Immediate::ScalarPair(
                         Scalar::from_pointer(ptr, ecx),
                         Scalar::from_target_usize(field_name.as_str().len() as u64, ecx),
+                    ),
+                    dest,
+                )?;
+            }
+
+            sym::type_id_name => {
+                let ty = ecx.read_type_id(&args[0])?;
+                ensure_monomorphic_enough(ty)?;
+                let path = crate::util::fluffy(ecx.tcx(), ty);
+                let ptr = ecx.allocate_bytes_dedup(path.as_str().as_bytes())?;
+                ecx.write_immediate(
+                    ScalarPair(
+                        Scalar::from_pointer(ptr, ecx),
+                        Scalar::from_target_usize(path.as_str().len() as u64, ecx),
                     ),
                     dest,
                 )?;
