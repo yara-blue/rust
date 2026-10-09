@@ -865,6 +865,7 @@ const impl<T: PointeeSized> Default for PhantomData<T> {
 #[unstable(feature = "structural_match", issue = "31434")]
 impl<T: PointeeSized> StructuralPartialEq for PhantomData<T> {}
 
+/// TODO(yara)
 /// Compiler-internal trait used to indicate the type of enum discriminants.
 ///
 /// This trait is automatically implemented for every type and does not add any

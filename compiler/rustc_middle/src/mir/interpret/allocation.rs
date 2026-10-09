@@ -83,6 +83,7 @@ impl AllocBytes for Box<[u8]> {
     }
 }
 
+// TODO(yara) interesting
 /// This type represents an Allocation in the Miri/CTFE core engine.
 ///
 /// Its public API is rather low-level, working directly with allocation offsets and a custom error

@@ -410,6 +410,7 @@ define!(
 define!("mir_move", fn Move<T>(place: T) -> T);
 define!("mir_static", fn Static<T>(s: T) -> &'static T);
 define!("mir_static_mut", fn StaticMut<T>(s: T) -> *mut T);
+// TODO(yara)
 define!(
     "mir_discriminant",
     /// Gets the discriminant of a place.

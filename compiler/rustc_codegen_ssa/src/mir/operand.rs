@@ -455,6 +455,14 @@ impl<'a, 'tcx, V: CodegenObject> OperandRef<'tcx, V> {
     }
 
     /// Obtain the actual discriminant of a value.
+    /// TODO(yara) understand this, then rewrite it to use TypeId instead of
+    /// cast_to: Ty<'tcx>
+    ///
+    /// - Lets just replace `Ty<'tcx>` with `TypeId`
+    /// - Also figure out how the T gets into the discriminant
+    /// - Also figure out how the "number" gets into the discriminant struct
+    ///   this seems to cast an int to the destination-type. So maybe we can
+    ///   just call this as is (once the TypeId stuff is done)
     #[instrument(level = "trace", skip(fx, bx))]
     pub fn codegen_get_discr<Bx: BuilderMethods<'a, 'tcx, Value = V>>(
         self,

@@ -3,6 +3,8 @@
 //! This are all methods operating on [`TypeId`](core::any::TypeId) which is the
 //! entry point to all compile time reflection.
 
+use crate::marker::DiscriminantKind;
+use crate::mem::type_info::VariantId;
 use crate::ptr;
 
 /// Gets an identifier which is globally unique to the specified type. This
@@ -202,3 +204,15 @@ pub fn type_id_function_ptr(_type_id: crate::any::TypeId) -> Option<crate::mem::
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_comptime]
 pub fn type_id_name(_type_id: crate::any::TypeId) -> &'static str;
+
+/// TODO(yara)
+#[rustc_intrinsic]
+#[unstable(feature = "core_intrinsics", issue = "none")]
+#[rustc_comptime]
+pub fn type_id_variant_getter(_type_id: crate::any::TypeId) -> fn(*const ()) -> VariantId;
+
+/// TODO(yara)
+#[rustc_intrinsic]
+#[unstable(feature = "core_intrinsics", issue = "none")]
+#[rustc_comptime]
+pub fn type_id_variant_lookup_table<T>() -> &'static [<T as DiscriminantKind>::Discriminant];

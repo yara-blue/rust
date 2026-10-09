@@ -2,7 +2,8 @@
 //! runtime or const-eval processable way.
 
 use crate::any::TypeId;
-use crate::marker::PointeeSized;
+use crate::marker::{DiscriminantKind, PointeeSized};
+use crate::mem::Discriminant;
 use crate::ptr::DynMetadata;
 use crate::{fmt, intrinsics};
 
@@ -14,6 +15,70 @@ use crate::{fmt, intrinsics};
 pub struct Type {
     /// Per-type information
     pub kind: TypeKind,
+}
+
+const fn reverse(l: &mut [u8; 100]) {
+    let mut left = 0;
+    let mut right = l.len();
+    while left < right {
+        l.swap(left, right);
+        left += 1;
+        right -= 1;
+    }
+}
+
+// const fn print_usize(mut num: usize) {
+//     let mut bytes = [0; 100];
+//     let mut len = 0;
+//     let digits = [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9'];
+//     while num > 0 {
+//         bytes[len] = digits[num.rem_euclid(10)];
+//         num -= num.rem_euclid(10);
+//         num /= 10;
+//     }
+//     reverse(&mut bytes);
+//
+//     unsafe extern "C" {
+//         fn write(fd: i32, buf: *const u8, count: usize) -> usize;
+//     }
+//
+//     unsafe {
+//         write(2, bytes.as_ptr(), len);
+//     }
+// }
+
+struct StdErr;
+
+use core::fmt::Write;
+impl Write for StdErr {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        unsafe extern "C" {
+            fn write(fd: i32, buf: *const u8, count: usize) -> usize;
+        }
+
+        unsafe {
+            write(2, s.as_ptr(), s.len());
+        }
+        Ok(())
+    }
+}
+
+#[lang = "variant_getter"]
+fn variant_getter<T: 'static>(val: *const ()) -> VariantId {
+    // SAFETY TODO(yara) probably needs to be an unsafe fn
+    let v: &T = unsafe { &*val.cast::<T>() };
+    let discriminant = core::mem::discriminant(v);
+    let lookup_table: &'static [<T as DiscriminantKind>::Discriminant] =
+        const { intrinsics::reflection::type_id_variant_lookup_table::<T>() };
+
+    writeln!(StdErr, "{lookup_table:?}");
+    writeln!(StdErr, "{discriminant:?}");
+
+    let variant = lookup_table
+        .iter()
+        .position(|d| Discriminant(*d) == discriminant)
+        .expect("table contains all possible discriminants");
+    VariantId { base: const { TypeId::of::<T>() }, variant }
 }
 
 /// Info of a trait implementation, you can retrieve the vtable with [Self::get_vtable]
@@ -682,12 +747,21 @@ impl TypeId {
     pub fn name(self) -> &'static str {
         intrinsics::reflection::type_id_name(self)
     }
+
+    /// TODO(yara)
+    #[unstable(feature = "type_info", issue = "146922")]
+    #[rustc_const_unstable(feature = "type_info", issue = "146922")]
+    #[rustc_comptime]
+    pub fn variant_getter(self) -> fn(*const ()) -> VariantId {
+        intrinsics::reflection::type_id_variant_getter(self)
+    }
 }
 
 /// Variant representing type ID. Representing a variant of an enum.
 #[derive(Copy, PartialOrd, Ord, Hash)]
 #[derive_const(Clone, PartialEq, Eq)]
 #[unstable(feature = "type_info", issue = "146922")]
+#[lang = "VariantId"]
 pub struct VariantId {
     base: TypeId,
     variant: usize,

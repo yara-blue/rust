@@ -1430,6 +1430,7 @@ pub enum Rvalue<'tcx> {
     /// return a value with the same type as their operand.
     UnaryOp(UnOp, Operand<'tcx>),
 
+    /// TODO(yara) adjust docs
     /// Computes the discriminant of the place, returning it as an integer of type
     /// [`discriminant_ty`]. Returns zero for types without discriminant.
     ///
