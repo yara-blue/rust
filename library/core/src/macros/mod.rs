@@ -196,6 +196,41 @@ pub macro assert_matches {
     }},
 }
 
+#[macro_export]
+#[unstable(feature = "type_info", issue = "146922")]
+#[rustc_diagnostic_opaque]
+macro_rules! cdbg {
+    () => {
+        core::intrinsics::reflection::ddbg("[");
+        core::intrinsics::reflection::ddbg(file);
+        core::intrinsics::reflection::ddbg(":");
+        core::intrinsics::reflection::ddbg(line);
+        core::intrinsics::reflection::ddbg(":");
+        core::intrinsics::reflection::ddbg(column);
+        core::intrinsics::reflection::ddbg("] ");
+    };
+    ($val:expr $(,)?) => {
+        let file = $crate::file!();
+        let line = $crate::line!();
+        let column = $crate::column!();
+
+        core::intrinsics::reflection::ddbg("[");
+        core::intrinsics::reflection::ddbg(file);
+        core::intrinsics::reflection::ddbg(":");
+        core::intrinsics::reflection::ddbg(line);
+        core::intrinsics::reflection::ddbg(":");
+        core::intrinsics::reflection::ddbg(column);
+        core::intrinsics::reflection::ddbg("] ");
+        core::intrinsics::reflection::ddbg($crate::stringify!($val));
+        core::intrinsics::reflection::ddbg(" = ");
+        core::intrinsics::reflection::ddbg($val);
+        core::intrinsics::reflection::ddbg("\n");
+    };
+    ($($val:expr),+ $(,)?) => {
+        ($($crate::cdbg!($val)),+,)
+    };
+}
+
 /// Selects code at compile-time based on `cfg` predicates.
 ///
 /// This macro evaluates, at compile-time, a series of `cfg` predicates,

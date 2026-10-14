@@ -216,3 +216,10 @@ pub fn type_id_variant_getter(_type_id: crate::any::TypeId) -> fn(*const ()) -> 
 #[unstable(feature = "core_intrinsics", issue = "none")]
 #[rustc_comptime]
 pub fn type_id_variant_lookup_table<T>() -> &'static [<T as DiscriminantKind>::Discriminant];
+
+/// TODO(yara)
+#[rustc_intrinsic]
+#[unstable(feature = "core_intrinsics", issue = "none")]
+#[rustc_comptime]
+pub fn ddbg<T: ?Sized>(t: T);
+

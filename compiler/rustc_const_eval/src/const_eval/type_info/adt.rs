@@ -30,7 +30,7 @@ impl<'tcx> InterpCx<'tcx, CompileTimeMachine<'tcx>> {
                     .discriminant_for_variant(*this.tcx, VariantIdx::from_usize(i as usize))
                     .expect("i is in range")
                     .val;
-                dbg!(i, discriminant);
+                // dbg!(i, discriminant);
                 let discriminant = ScalarInt::try_from_uint(discriminant, discriminant_size)
                     .expect("127 bits should be enough discriminant"); // TODO(yara): test this
                 this.write_scalar(discriminant, &place)

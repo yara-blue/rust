@@ -5,6 +5,7 @@ use rustc_errors::DiagMessage;
 use rustc_hir as hir;
 use rustc_middle::traits::{ObligationCause, ObligationCauseCode};
 use rustc_middle::ty::consts::ConstExt;
+use rustc_middle::ty::inherent::Ty as _;
 use rustc_middle::ty::{self, Const, Ty, TyCtxt};
 use rustc_span::def_id::LocalDefId;
 use rustc_span::{Span, Symbol, sym};
@@ -208,6 +209,7 @@ fn intrinsic_operation_unsafety(tcx: TyCtxt<'_>, intrinsic_id: LocalDefId) -> hi
         | sym::type_id_generics
         | sym::type_id_is_signed
         | sym::type_id_name
+        | sym::ddbg
         | sym::type_id_non_exhaustive
         | sym::type_id_points_mutably
         | sym::type_id_points_to
@@ -395,6 +397,7 @@ pub(crate) fn check_intrinsic_type(
         sym::field_representing_type_name => (0, 0, vec![type_id_ty()], Ty::new_static_str(tcx)),
         sym::field_representing_type_offset => (0, 0, vec![type_id_ty()], tcx.types.usize),
         sym::type_id_name => (0, 0, vec![type_id_ty()], Ty::new_static_str(tcx)),
+        sym::ddbg => (1, 0, vec![param(0)], Ty::new_unit(tcx)),
         sym::type_id_non_exhaustive => (0, 0, vec![type_id_ty()], tcx.types.bool),
         sym::type_id_generics => (
             0,

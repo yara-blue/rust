@@ -32,6 +32,8 @@ use crate::interpret::{
     type_implements_dyn_trait,
 };
 
+mod ddbg;
+
 /// When hitting this many interpreted terminators we emit a deny by default lint
 /// that notfies the user that their constant takes a long time to evaluate. If that's
 /// what they intended, they can just allow the lint.
@@ -818,6 +820,16 @@ impl<'tcx> interpret::Machine<'tcx> for CompileTimeMachine<'tcx> {
                     ),
                     dest,
                 )?;
+            }
+
+            sym::ddbg => {
+                let ty = instance
+                    .args
+                    .first()
+                    .expect("has one generic")
+                    .as_type()
+                    .expect("the generic arg is a Ty");
+                ddbg::print(ty, args, ecx);
             }
 
             sym::type_id_name => {

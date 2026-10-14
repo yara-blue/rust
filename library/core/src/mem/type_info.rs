@@ -47,21 +47,21 @@ const fn reverse(l: &mut [u8; 100]) {
 //     }
 // }
 
-struct StdErr;
-
-use core::fmt::Write;
-impl Write for StdErr {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        unsafe extern "C" {
-            fn write(fd: i32, buf: *const u8, count: usize) -> usize;
-        }
-
-        unsafe {
-            write(2, s.as_ptr(), s.len());
-        }
-        Ok(())
-    }
-}
+// struct StdErr;
+//
+// use core::fmt::Write;
+// impl Write for StdErr {
+//     fn write_str(&mut self, s: &str) -> fmt::Result {
+//         unsafe extern "C" {
+//             fn write(fd: i32, buf: *const u8, count: usize) -> usize;
+//         }
+//
+//         unsafe {
+//             write(2, s.as_ptr(), s.len());
+//         }
+//         Ok(())
+//     }
+// }
 
 #[lang = "variant_getter"]
 fn variant_getter<T: 'static>(val: *const ()) -> VariantId {
@@ -71,8 +71,8 @@ fn variant_getter<T: 'static>(val: *const ()) -> VariantId {
     let lookup_table: &'static [<T as DiscriminantKind>::Discriminant] =
         const { intrinsics::reflection::type_id_variant_lookup_table::<T>() };
 
-    writeln!(StdErr, "{lookup_table:?}");
-    writeln!(StdErr, "{discriminant:?}");
+    // writeln!(StdErr, "{lookup_table:?}");
+    // writeln!(StdErr, "{discriminant:?}");
 
     let variant = lookup_table
         .iter()
